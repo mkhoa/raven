@@ -131,3 +131,61 @@ def test_llm_configuration(
 
 	except Exception as e:
 		return {"success": False, "message": f"Connection failed: {str(e)}"}
+
+
+@frappe.whitelist()
+def get_gemini_available_models():
+	"""
+	API to get the available Gemini models
+	"""
+	frappe.has_permission(doctype="Raven Bot", ptype="read", throw=True)
+	
+	try:
+		settings = frappe.get_single("Raven Settings")
+		api_key = settings.get_password("gemini_api_key")
+		
+		if not api_key:
+			return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+			
+		from google import genai
+		client = genai.Client(api_key=api_key)
+		
+		# List models and filter for generateContent compatible ones
+		models = client.models.list()
+		compatible_models = []
+		for m in models:
+			if "generateContent" in m.supported_methods:
+				compatible_models.append(m.name.replace("models/", ""))
+				
+		return compatible_models
+	except Exception as e:
+		frappe.log_error(f"Error fetching Gemini models: {str(e)}", "Raven AI")
+		return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+
+
+@frappe.whitelist()
+def test_gemini_configuration():
+	"""
+	Test Gemini configuration
+	"""
+	frappe.has_permission(doctype="Raven Settings", ptype="write", throw=True)
+	
+	try:
+		settings = frappe.get_single("Raven Settings")
+		api_key = settings.get_password("gemini_api_key")
+		
+		if not api_key:
+			return {"success": False, "message": "Gemini API Key is missing"}
+			
+		from google import genai
+		client = genai.Client(api_key=api_key)
+		
+		# Try a minimal list models call to verify the key
+		models = client.models.list(config={'page_size': 5})
+		return {
+			"success": True, 
+			"message": "Successfully connected to Gemini API",
+			"models": [{"id": m.name.replace("models/", "")} for m in models]
+		}
+	except Exception as e:
+		return {"success": False, "message": f"Gemini connection failed: {str(e)}"}

@@ -306,14 +306,22 @@ const ModelSelector = () => {
         revalidateIfStale: false
     })
 
+    // Fetch Gemini models
+    const { data: geminiModels } = useFrappeGetCall('raven.api.ai_features.get_gemini_available_models', undefined, modelProvider === 'Gemini' ? undefined : null, {
+        revalidateOnFocus: false,
+        revalidateIfStale: false
+    })
+
     const localModels = localModelData?.message.models?.map(m => m.id) || []
 
     if (!is_ai_bot) return null
 
-    const models: string[] = modelProvider === 'Local LLM' ? localModels : openaiModels?.message || []
+    const models: string[] = modelProvider === 'Local LLM' ? localModels : modelProvider === 'Gemini' ? geminiModels?.message || [] : openaiModels?.message || []
     const defaultModel = modelProvider === 'Local LLM'
         ? (localModels[0] || 'default-model')
-        : modelProvider === 'Gemini' ? 'gemini-1.5-flash' : 'gpt-4o'
+        : modelProvider === 'Gemini' 
+        ? (geminiModels?.message?.[0] || 'gemini-1.5-flash') 
+        : 'gpt-4o'
 
     // Filter out empty strings from models
     const validModels = models.filter(model => model && model.trim() !== '')
@@ -338,10 +346,8 @@ const ModelSelector = () => {
                                     validModels.map((model: string) => (
                                         <Select.Item key={model} value={model}>{model}</Select.Item>
                                     ))
-                                ) : modelProvider === 'Local LLM' ? (
+                                ) : modelProvider === 'Local LLM' || modelProvider === 'Gemini' ? (
                                     <Select.Item value="no-models" disabled>No models available</Select.Item>
-                                ) : modelProvider === 'Gemini' ? (
-                                    <Select.Item value="gemini-1.5-flash">gemini-1.5-flash</Select.Item>
                                 ) : (
                                     <Select.Item value={defaultModel}>{defaultModel}</Select.Item>
                                 )}
