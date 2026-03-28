@@ -152,19 +152,24 @@ def get_gemini_available_models():
 		from google import genai
 		client = genai.Client(api_key=api_key)
 		
-		# List models and filter for generateContent compatible ones
-		models = list(client.models.list(config={'page_size': 50}))
+		# Simplify call - just use default list()
+		# Use a generator approach to be safe with large lists
+		models_iterator = client.models.list()
+		
 		compatible_models = []
-		for m in models:
-			if "generateContent" in m.supported_methods:
+		for m in models_iterator:
+			# Check supported actions for generateContent
+			actions = getattr(m, "supported_actions", [])
+			if "generateContent" in actions:
 				name = m.name.replace("models/", "")
-				# Filter for actual model IDs, skip legacy/internal ones if needed
+				# Skip purely internal or non-text models
 				if not any(x in name for x in ["vision", "aqa", "embedding"]):
 					compatible_models.append(name)
 				
 		return compatible_models or ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
 	except Exception as e:
-		frappe.log_error(f"Error fetching Gemini models: {str(e)}", "Raven AI")
+		import traceback
+		frappe.log_error(f"Error fetching Gemini models: {str(e)}\n{traceback.format_exc()}", "Raven AI")
 		return ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
 
 
@@ -186,11 +191,14 @@ def test_gemini_configuration():
 		client = genai.Client(api_key=api_key)
 		
 		# Try a minimal list models call to verify the key
-		models = list(client.models.list(config={'page_size': 5}))
+		models = client.models.list()
+		# Just check if we can get at least one model
+		first_model = next(iter(models), None)
+		
 		return {
 			"success": True, 
 			"message": "Successfully connected to Gemini API",
-			"models": [{"id": m.name.replace("models/", "")} for m in models]
+			"models": [{"id": first_model.name.replace("models/", "")}] if first_model else []
 		}
 	except Exception as e:
 		return {"success": False, "message": f"Gemini connection failed: {str(e)}"}
