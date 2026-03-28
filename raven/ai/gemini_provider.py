@@ -33,101 +33,134 @@ class GeminiModel(Model):
         pass
 
     def _convert_input_to_gemini(self, input_items: str | list[TResponseInputItem]) -> list[types.Content]:
+        """Convert OpenAI-style history to Gemini Contents"""
         if isinstance(input_items, str):
-            return [types.Content(role="user", parts=[types.Part.from_text(text=input_items)])]
+            return [types.Content(role="user", parts=[types.Part(text=input_items)])]
 
         gemini_contents = []
         for item in input_items:
             role = item.get("role")
             content = item.get("content")
             
-            # Map roles exactly as Gemini expects: 'user' or 'model' (for assistant)
-            # system role is not a valid conversational turn role, it is handled via GenerateContentConfig
+            # Skip system role (handled via system_instruction parameter)
             if role == "system":
-                # System instructions should not be in the messages array for Gemini
-                # the integration layer usually passes it to system_instructions parameter
                 continue
 
-            gemini_role = "user" if role in ["user", "tool"] else "model"
-            
+            # Map OpenAI/Raven roles to Gemini roles
+            # Gemini: 'user' or 'model' (for assistant)
+            gemini_role = "model" if role == "assistant" else "user"
             parts = []
+
+            # 1. Handle Text Content
             if isinstance(content, str) and content:
-                parts.append(types.Part.from_text(text=content))
+                parts.append(types.Part(text=content))
             elif isinstance(content, list):
                 for part in content:
-                    if getattr(part, "type", part.get("type")) == "text":
-                        # Support objects or dicts
-                        text_val = getattr(part, "text", part.get("text", ""))
+                    ptype = getattr(part, "type", part.get("type", None) if isinstance(part, dict) else None)
+                    if ptype == "text":
+                        text_val = getattr(part, "text", part.get("text", "") if isinstance(part, dict) else "")
                         if text_val:
-                            parts.append(types.Part.from_text(text=text_val))
+                            parts.append(types.Part(text=text_val))
+                    elif isinstance(part, str):
+                        parts.append(types.Part(text=part))
 
-            # Handle tool calls in assistant messages
+            # 2. Handle Tool Calls (Assistant Message)
             tool_calls = item.get("tool_calls")
             if tool_calls:
                 for tc in tool_calls:
-                    if getattr(tc, "type", tc.get("type")) == "function":
-                        func = getattr(tc, "function", tc.get("function"))
-                        func_name = getattr(func, "name", func.get("name"))
-                        func_args = getattr(func, "arguments", func.get("arguments", "{}"))
+                    ptype = getattr(tc, "type", tc.get("type") if isinstance(tc, dict) else None)
+                    if ptype == "function":
+                        fn = getattr(tc, "function", tc.get("function") if isinstance(tc, dict) else {})
+                        fn_name = getattr(fn, "name", fn.get("name") if isinstance(fn, dict) else "")
+                        fn_args = getattr(fn, "arguments", fn.get("arguments", "{}") if isinstance(fn, dict) else "{}")
                         
-                        try:
-                            parsed_args = json.loads(func_args) if isinstance(func_args, str) else func_args
-                        except json.JSONDecodeError:
-                            parsed_args = {}
-                            
-                        parts.append(types.Part.from_function_call(
-                            name=func_name,
-                            args=parsed_args
+                        # Handle encoded thought_signature in call_id
+                        raw_id = getattr(tc, "id", tc.get("id"))
+                        call_id = raw_id
+                        thought_sig = None
+                        if raw_id and "||ts||" in str(raw_id):
+                            parts_id = str(raw_id).split("||ts||")
+                            call_id = parts_id[0]
+                            thought_sig = parts_id[1]
+                        
+                        # Gemini expects args as dict
+                        if isinstance(fn_args, str):
+                            try:
+                                fn_args = json.loads(fn_args)
+                            except:
+                                fn_args = {}
+                                
+                        parts.append(types.Part(
+                            function_call=types.FunctionCall(
+                                id=call_id,
+                                name=fn_name,
+                                args=fn_args
+                            ),
+                            thought_signature=thought_sig
                         ))
 
-            # Handle tool responses
+            # 3. Handle Tool Responses (Tool Message)
             if role == "tool":
-                # ensure response is a valid struct
-                tool_res = content
+                fn_name = item.get("name")
+                # Handle encoded thought_signature in tool_call_id
+                raw_id = item.get("tool_call_id")
+                call_id = raw_id
+                if raw_id and "||ts||" in str(raw_id):
+                    parts_id = str(raw_id).split("||ts||")
+                    call_id = parts_id[0]
+                
+                # Gemini expects function_response to be a dict
                 try:
-                    if isinstance(tool_res, str):
-                        tool_res_dict = json.loads(tool_res)
-                    else:
-                        tool_res_dict = tool_res
-                        
-                    if not isinstance(tool_res_dict, dict):
-                        tool_res_dict = {"result": tool_res}
-                except (json.JSONDecodeError, TypeError):
-                    tool_res_dict = {"result": str(tool_res)}
-
-                parts.append(types.Part.from_function_response(
-                    name=item.get("name", "unknown"), 
-                    response=tool_res_dict
+                    res_val = json.loads(content) if isinstance(content, str) else content
+                except:
+                    res_val = {"output": content}
+                
+                parts.append(types.Part(
+                    function_response=types.FunctionResponse(
+                        id=call_id,
+                        name=fn_name,
+                        response=res_val if isinstance(res_val, dict) else {"result": res_val}
+                    )
                 ))
 
             if parts:
                 gemini_contents.append(types.Content(role=gemini_role, parts=parts))
-
+        
         return gemini_contents
 
     def _cleanup_schema(self, schema: dict) -> dict:
         """
         Recursively remove unsupported fields from JSON schema for Gemini.
-        Gemini does not support 'additionalProperties' or 'additional_properties' in its FunctionDeclaration schema.
+        Gemini's FunctionDeclaration is extremely strict and will fail on 'additionalProperties', 
+        'title', 'description' (at property level), and other common JSON schema fields.
         """
         if not isinstance(schema, dict):
             return schema
 
-        # Create a copy to avoid modifying the original tool object
+        # Create a deep copy
         cleaned = schema.copy()
 
-        # Remove unsupported fields
-        unsupported_fields = ["additionalProperties", "additional_properties", "default", "examples", "title"]
-        for field in unsupported_fields:
+        # Remove unsupported fields from this level
+        unsupported = [
+            "additionalProperties", "additional_properties", "default", 
+            "examples", "title", "description", "format", "pattern", 
+            "minimum", "maximum", "minLength", "maxLength"
+        ]
+        for field in unsupported:
             cleaned.pop(field, None)
 
-        # Recursively clean nested properties
+        # Handle properties - Gemini only wants type and properties at top level
+        # and type + items/properties at nested levels.
         if "properties" in cleaned and isinstance(cleaned["properties"], dict):
             cleaned["properties"] = {k: self._cleanup_schema(v) for k, v in cleaned["properties"].items()}
 
-        # Recursively clean array items
+        # Handle array items
         if "items" in cleaned and isinstance(cleaned["items"], dict):
             cleaned["items"] = self._cleanup_schema(cleaned["items"])
+
+        # Determine type if missing but properties exist
+        if "properties" in cleaned and "type" not in cleaned:
+            cleaned["type"] = "object"
 
         return cleaned
 
@@ -212,13 +245,13 @@ class GeminiModel(Model):
         output_items: list[dict[str, Any]] = []
         if response.candidates:
             for candidate in response.candidates:
-                if not candidate.content or not getattr(candidate.content, "parts", None):
+                if not candidate.content or not hasattr(candidate.content, "parts"):
                     continue
                     
                 parts = candidate.content.parts
                 
                 # Extract text parts
-                text_parts = [p.text for p in parts if getattr(p, "text", None)]
+                text_parts = [p.text for p in parts if hasattr(p, "text") and p.text]
                 if text_parts:
                     msg_id = f"msg_{frappe.generate_hash(length=12)}"
                     output_items.append({
@@ -228,41 +261,48 @@ class GeminiModel(Model):
                         "type": "message",
                         "content": [{
                             "type": "output_text", 
-                            "text": " ".join(text_parts),
+                            "text": "".join(text_parts),
                             "annotations": []
                         }]
                     })
                 
                 # Extract function calls
                 for part in parts:
-                    if getattr(part, "function_call", None):
+                    if hasattr(part, "function_call") and part.function_call:
                         fc = part.function_call
-                        fc_name = fc.name
-                        fc_args = fc.args if fc.args else {}
-                        args_json = json.dumps(fc_args) if isinstance(fc_args, dict) else str(fc_args)
                         
-                        call_id = f"call_{frappe.generate_hash(length=12)}"
+                        # Extract and encode thought_signature into the call_id
+                        raw_id = fc.id or frappe.generate_hash(length=12)
+                        thought_sig = getattr(part, "thought_signature", None)
+                        
+                        encoded_id = raw_id
+                        if thought_sig:
+                            encoded_id = f"{raw_id}||ts||{thought_sig}"
+                        
+                        args_dict = fc.args if isinstance(fc.args, dict) else {}
+                        args_json = json.dumps(args_dict)
+                        
                         output_items.append({
-                            "id": call_id,
-                            "call_id": call_id,
-                            "type": "function",
+                            "id": encoded_id,
+                            "call_id": encoded_id,
+                            "type": "function_call",
                             "status": "completed",
-                            "name": fc_name,
+                            "name": fc.name,
                             "arguments": args_json,
                             "function": {
-                                "name": fc_name,
+                                "name": fc.name,
                                 "arguments": args_json
                             }
                         })
 
         usage_metadata = response.usage_metadata
         usage = Usage(
-            input_tokens=usage_metadata.prompt_token_count if usage_metadata else 0,
-            output_tokens=usage_metadata.candidates_token_count if usage_metadata else 0,
-            total_tokens=usage_metadata.total_token_count if usage_metadata else 0
+            input_tokens=(usage_metadata.prompt_token_count or 0) if usage_metadata else 0,
+            output_tokens=(usage_metadata.candidates_token_count or 0) if usage_metadata else 0,
+            total_tokens=(usage_metadata.total_token_count or 0) if usage_metadata else 0
         )
 
-        return ModelResponse(output=output_items, usage=usage, response_id=None)
+        return ModelResponse(output=output_items, usage=usage, response_id=frappe.generate_hash(length=12))
 
     def stream_response(
         self,
