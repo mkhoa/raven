@@ -510,7 +510,7 @@ def process_message_with_agent(
 		if response["success"]:
 			# Only send a response if there is one
 			if response["response"] is not None:
-				bot.send_message(channel_id=channel_id, text=response["response"])
+				bot.send_message(channel_id=channel_id, text=response["response"], markdown=True)
 			# If response is None (e.g., file-only upload), don't send anything
 		else:
 			# Send error message
@@ -518,7 +518,7 @@ def process_message_with_agent(
 			if bot.debug_mode and response.get("error"):
 				error_text += f"\n\nError: {response['error']}"
 
-			bot.send_message(channel_id=channel_id, text=error_text)
+			bot.send_message(channel_id=channel_id, text=error_text, markdown=True)
 
 		# Clear the "thinking" message after sending the response
 		frappe.publish_realtime(
@@ -542,7 +542,7 @@ def process_message_with_agent(
 		if bot.debug_mode:
 			error_text += f"\n\nError: {str(e)}"
 
-		bot.send_message(channel_id=channel_id, text=error_text)
+		bot.send_message(channel_id=channel_id, text=error_text, markdown=True)
 
 		# Clear the "thinking" message even on error
 		frappe.publish_realtime(
