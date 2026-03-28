@@ -1,5 +1,4 @@
 import frappe
-import openai
 
 from raven.ai.handler import get_variables_for_instructions
 
@@ -92,6 +91,7 @@ def test_llm_configuration(
 					}
 
 			if api_key:
+				import openai
 				# Use OpenAI client for OpenAI Compatible services
 				client = openai.OpenAI(api_key=api_key, base_url=api_url)
 				models = client.models.list()

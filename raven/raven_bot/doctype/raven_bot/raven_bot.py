@@ -6,7 +6,15 @@ import json
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from openai import APIConnectionError
+
+# Safe import for OpenAI exceptions (v0.x vs v1.x/v2.x)
+try:
+	from openai import APIConnectionError
+except ImportError:
+	try:
+		from openai.error import APIConnectionError
+	except ImportError:
+		APIConnectionError = Exception
 
 from raven.ai.openai_client import (
 	code_interpreter_file_types,
