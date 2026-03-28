@@ -168,9 +168,9 @@ class GeminiModel(Model):
         handoffs: list[Handoff],
         tracing: ModelTracing,
         *,
-        previous_response_id: str | None,
-        conversation_id: str | None,
-        prompt: ResponsePromptParam | None,
+        previous_response_id: str | None = None,
+        conversation_id: str | None = None,
+        prompt: ResponsePromptParam | None = None,
     ) -> ModelResponse:
         
         if not self.client:
@@ -264,7 +264,20 @@ class GeminiModel(Model):
 
         return ModelResponse(output=output_items, usage=usage, response_id=None)
 
-    def stream_response(self, *args, **kwargs) -> AsyncIterator[TResponseStreamEvent]:
+    def stream_response(
+        self,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[Tool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[Handoff],
+        tracing: ModelTracing,
+        *,
+        previous_response_id: str | None = None,
+        conversation_id: str | None = None,
+        prompt: ResponsePromptParam | None = None,
+    ) -> AsyncIterator[TResponseStreamEvent]:
         # Not fully implemented yet, raises NotImplementedError on usage
         raise NotImplementedError("Streaming not yet implemented for standard GeminiProvider")
 
