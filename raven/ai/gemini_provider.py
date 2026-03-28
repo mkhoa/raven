@@ -45,103 +45,152 @@ class GeminiModel(Model):
     async def close(self) -> None:
         pass
 
+    def _decode_call_id(self, raw_id: str) -> tuple[str, bytes | None]:
+        """Strip ||ts||<b64> suffix from a call_id and return (clean_id, thought_sig_bytes)."""
+        if raw_id and "||ts||" in str(raw_id):
+            parts = str(raw_id).split("||ts||", 1)
+            try:
+                return parts[0], base64.b64decode(parts[1])
+            except Exception:
+                return parts[0], None
+        return raw_id, None
+
     def _convert_input_to_gemini(self, input_items: str | list[TResponseInputItem]) -> list[types.Content]:
-        """Convert OpenAI-style history to Gemini Contents"""
+        """Convert agents SDK conversation history to Gemini Contents.
+
+        Handles two input formats:
+        - Responses API format (type="function_call" / "function_call_output" / "message")
+          which is what openai-agents sends on turns 2+
+        - OpenAI chat format (role="assistant" with tool_calls / role="tool")
+          which is used for manual conversation_history passed in turn 1
+        """
         if isinstance(input_items, str):
             return [types.Content(role="user", parts=[types.Part(text=input_items)])]
 
+        # First pass: build call_id → name map so function_call_output can include the name
+        call_id_to_name: dict[str, str] = {}
+        for item in input_items:
+            item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            if item_type == "function_call":
+                raw_id = item.get("call_id") or item.get("id") if isinstance(item, dict) else getattr(item, "call_id", None)
+                fn_name = item.get("name", "") if isinstance(item, dict) else getattr(item, "name", "")
+                if raw_id:
+                    clean_id, _ = self._decode_call_id(str(raw_id))
+                    call_id_to_name[clean_id] = fn_name
+
         gemini_contents = []
         for item in input_items:
-            role = item.get("role")
-            content = item.get("content")
-            
-            # Skip system role (handled via system_instruction parameter)
+            role = item.get("role") if isinstance(item, dict) else getattr(item, "role", None)
+            item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+            content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
+
+            # Skip system messages — handled via system_instruction parameter
             if role == "system":
                 continue
 
-            # Map OpenAI/Raven roles to Gemini roles
-            # Gemini: 'user' or 'model' (for assistant)
+            # ── Responses API: type="function_call" (assistant tool call) ──────────
+            if item_type == "function_call":
+                fn_name = item.get("name", "") if isinstance(item, dict) else getattr(item, "name", "")
+                fn_args = item.get("arguments", "{}") if isinstance(item, dict) else getattr(item, "arguments", "{}")
+                raw_id = item.get("call_id") or item.get("id") if isinstance(item, dict) else getattr(item, "call_id", None) or getattr(item, "id", None)
+                call_id, thought_sig = self._decode_call_id(str(raw_id) if raw_id else "")
+                if isinstance(fn_args, str):
+                    try:
+                        fn_args = json.loads(fn_args)
+                    except Exception:
+                        fn_args = {}
+                gemini_contents.append(types.Content(
+                    role="model",
+                    parts=[types.Part(
+                        function_call=types.FunctionCall(id=call_id, name=fn_name, args=fn_args),
+                        thought_signature=thought_sig,
+                    )],
+                ))
+                continue
+
+            # ── Responses API: type="function_call_output" (tool result) ─────────
+            if item_type == "function_call_output":
+                raw_id = item.get("call_id") if isinstance(item, dict) else getattr(item, "call_id", None)
+                call_id, _ = self._decode_call_id(str(raw_id) if raw_id else "")
+                fn_name = call_id_to_name.get(call_id, "")
+                output = item.get("output") if isinstance(item, dict) else getattr(item, "output", "")
+                try:
+                    res_val = json.loads(output) if isinstance(output, str) else output
+                except Exception:
+                    res_val = {"output": output}
+                if not isinstance(res_val, dict):
+                    res_val = {"result": res_val}
+                gemini_contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(
+                        function_response=types.FunctionResponse(
+                            id=call_id,
+                            name=fn_name,
+                            response=res_val,
+                        )
+                    )],
+                ))
+                continue
+
+            # ── Map role to Gemini role ───────────────────────────────────────────
             gemini_role = "model" if role == "assistant" else "user"
             parts = []
 
-            # 1. Handle Text Content
+            # ── Text content (str or list of content parts) ───────────────────────
             if isinstance(content, str) and content:
                 parts.append(types.Part(text=content))
             elif isinstance(content, list):
                 for part in content:
-                    ptype = getattr(part, "type", part.get("type", None) if isinstance(part, dict) else None)
-                    if ptype == "text":
-                        text_val = getattr(part, "text", part.get("text", "") if isinstance(part, dict) else "")
+                    ptype = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+                    # Accept "text" (chat format), "output_text" and "input_text" (Responses API)
+                    if ptype in ("text", "output_text", "input_text"):
+                        text_val = part.get("text", "") if isinstance(part, dict) else getattr(part, "text", "")
                         if text_val:
                             parts.append(types.Part(text=text_val))
                     elif isinstance(part, str):
                         parts.append(types.Part(text=part))
 
-            # 2. Handle Tool Calls (Assistant Message)
-            tool_calls = item.get("tool_calls")
+            # ── OpenAI chat format: tool_calls on assistant message ───────────────
+            tool_calls = item.get("tool_calls") if isinstance(item, dict) else None
             if tool_calls:
                 for tc in tool_calls:
-                    ptype = getattr(tc, "type", tc.get("type") if isinstance(tc, dict) else None)
+                    ptype = tc.get("type") if isinstance(tc, dict) else getattr(tc, "type", None)
                     if ptype == "function":
-                        fn = getattr(tc, "function", tc.get("function") if isinstance(tc, dict) else {})
-                        fn_name = getattr(fn, "name", fn.get("name") if isinstance(fn, dict) else "")
-                        fn_args = getattr(fn, "arguments", fn.get("arguments", "{}") if isinstance(fn, dict) else "{}")
-                        
-                        # Handle encoded thought_signature in call_id
-                        raw_id = getattr(tc, "id", tc.get("id"))
-                        call_id = raw_id
-                        thought_sig = None
-                        if raw_id and "||ts||" in str(raw_id):
-                            parts_id = str(raw_id).split("||ts||", 1)
-                            call_id = parts_id[0]
-                            try:
-                                thought_sig = base64.b64decode(parts_id[1])
-                            except Exception:
-                                thought_sig = parts_id[1]
-                        
-                        # Gemini expects args as dict
+                        fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", {})
+                        fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
+                        fn_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
+                        raw_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                        call_id, thought_sig = self._decode_call_id(str(raw_id) if raw_id else "")
                         if isinstance(fn_args, str):
                             try:
                                 fn_args = json.loads(fn_args)
-                            except:
+                            except Exception:
                                 fn_args = {}
-                                
                         parts.append(types.Part(
-                            function_call=types.FunctionCall(
-                                id=call_id,
-                                name=fn_name,
-                                args=fn_args
-                            ),
-                            thought_signature=thought_sig
+                            function_call=types.FunctionCall(id=call_id, name=fn_name, args=fn_args),
+                            thought_signature=thought_sig,
                         ))
 
-            # 3. Handle Tool Responses (Tool Message)
+            # ── OpenAI chat format: role="tool" ───────────────────────────────────
             if role == "tool":
-                fn_name = item.get("name")
-                # Handle encoded thought_signature in tool_call_id
-                raw_id = item.get("tool_call_id")
-                call_id = raw_id
-                if raw_id and "||ts||" in str(raw_id):
-                    parts_id = str(raw_id).split("||ts||", 1)
-                    call_id = parts_id[0]
-                
-                # Gemini expects function_response to be a dict
+                fn_name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+                raw_id = item.get("tool_call_id") if isinstance(item, dict) else getattr(item, "tool_call_id", None)
+                call_id, _ = self._decode_call_id(str(raw_id) if raw_id else "")
                 try:
                     res_val = json.loads(content) if isinstance(content, str) else content
-                except:
+                except Exception:
                     res_val = {"output": content}
-                
                 parts.append(types.Part(
                     function_response=types.FunctionResponse(
                         id=call_id,
                         name=fn_name,
-                        response=res_val if isinstance(res_val, dict) else {"result": res_val}
+                        response=res_val if isinstance(res_val, dict) else {"result": res_val},
                     )
                 ))
 
             if parts:
                 gemini_contents.append(types.Content(role=gemini_role, parts=parts))
-        
+
         return gemini_contents
 
     def _cleanup_schema(self, schema: dict) -> dict:
@@ -224,6 +273,19 @@ class GeminiModel(Model):
         
         if not self.client:
             raise Exception("Gemini client not initialized. Check API Key.")
+
+        # DEBUG: log raw input items to see what the agents SDK sends on each turn
+        try:
+            if isinstance(input, list):
+                debug_input = []
+                for i, item in enumerate(input):
+                    item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+                    item_role = item.get("role") if isinstance(item, dict) else getattr(item, "role", None)
+                    item_keys = list(item.keys()) if isinstance(item, dict) else dir(item)
+                    debug_input.append(f"  [{i}] type={item_type} role={item_role} keys={item_keys}")
+                frappe.log_error("\n".join(["Input items:"] + debug_input), "Gemini Debug Input")
+        except Exception as _dbg_e:
+            frappe.log_error(f"Input debug failed: {_dbg_e}", "Gemini Debug Input")
 
         # If input has system prompt embedded inside the list, extract it as system_instruction
         if isinstance(input, list):
