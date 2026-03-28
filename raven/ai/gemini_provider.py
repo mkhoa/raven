@@ -242,14 +242,37 @@ class GeminiModel(Model):
             frappe.log_error(f"Gemini API Error: {str(e)}", "Gemini Native Provider")
             raise Exception(f"Failed to generate content via Gemini API: {str(e)}")
 
+        # DEBUG: log raw Gemini response
+        try:
+            debug_lines = [
+                f"model={self.model_name}",
+                f"candidates={len(response.candidates) if response.candidates else 0}",
+                f"prompt_feedback={getattr(response, 'prompt_feedback', None)}",
+                f"usage={response.usage_metadata}",
+            ]
+            if response.candidates:
+                for ci, cand in enumerate(response.candidates):
+                    debug_lines.append(f"candidate[{ci}].finish_reason={getattr(cand, 'finish_reason', None)}")
+                    if cand.content and hasattr(cand.content, "parts"):
+                        for pi, p in enumerate(cand.content.parts):
+                            debug_lines.append(
+                                f"  part[{pi}]: text={repr(p.text)[:120] if hasattr(p, 'text') else 'N/A'}"
+                                f" | thought={getattr(p, 'thought', None)}"
+                                f" | has_fc={bool(getattr(p, 'function_call', None))}"
+                                f" | has_ts={bool(getattr(p, 'thought_signature', None))}"
+                            )
+            frappe.log_error("\n".join(debug_lines), "Gemini Debug")
+        except Exception as _dbg_e:
+            frappe.log_error(f"Debug logging failed: {_dbg_e}", "Gemini Debug")
+
         output_items: list[dict[str, Any]] = []
         if response.candidates:
             for candidate in response.candidates:
                 if not candidate.content or not hasattr(candidate.content, "parts"):
                     continue
-                    
+
                 parts = candidate.content.parts
-                
+
                 # Extract text parts
                 text_parts = [p.text for p in parts if hasattr(p, "text") and p.text]
                 if text_parts:
