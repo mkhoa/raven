@@ -257,8 +257,8 @@ class GeminiModel(Model):
 
         usage_metadata = response.usage_metadata
         usage = Usage(
-            prompt_tokens=usage_metadata.prompt_token_count if usage_metadata else 0,
-            completion_tokens=usage_metadata.candidates_token_count if usage_metadata else 0,
+            input_tokens=usage_metadata.prompt_token_count if usage_metadata else 0,
+            output_tokens=usage_metadata.candidates_token_count if usage_metadata else 0,
             total_tokens=usage_metadata.total_token_count if usage_metadata else 0
         )
 
