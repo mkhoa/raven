@@ -28,6 +28,9 @@
   "google_processor_location",
   "google_project_id",
   "google_service_account_json_key",
+  "gemini_section",
+  "enable_gemini_services",
+  "gemini_api_key",
   "frappe_hr_tab",
   "auto_create_department_channel",
   "department_channel_type",
@@ -279,6 +282,25 @@
    "fieldtype": "Password",
    "label": "Google Service Account JSON Key",
    "length": 800
+  },
+  {
+   "fieldname": "gemini_section",
+   "fieldtype": "Section Break",
+   "label": "Gemini Configuration"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.enable_ai_integration",
+   "fieldname": "enable_gemini_services",
+   "fieldtype": "Check",
+   "label": "Enable Gemini Services"
+  },
+  {
+   "depends_on": "eval:doc.enable_gemini_services;",
+   "fieldname": "gemini_api_key",
+   "fieldtype": "Password",
+   "label": "Gemini API Key",
+   "mandatory_depends_on": "eval:doc.enable_gemini_services;"
   },
   {
    "fieldname": "video_calling_tab",

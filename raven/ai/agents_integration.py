@@ -72,6 +72,13 @@ class RavenAgentManager:
 			self.provider = OpenAIProvider(
 				openai_client=client, use_responses=False  # Force use of chat/completions endpoint
 			)
+		elif self.bot_doc.model_provider == "Gemini" and self.settings.enable_gemini_services:
+			api_key = self.settings.get_password("gemini_api_key")
+			if not api_key:
+				frappe.throw(_("Gemini API key is not configured in Raven Settings"))
+			from raven.ai.gemini_provider import GeminiProvider
+			self.provider = GeminiProvider(api_key=api_key)
+			self.client = None # no openai client for Gemini
 		else:
 			# Standard OpenAI client
 			api_key = self.settings.get_password("openai_api_key")
@@ -95,6 +102,17 @@ class RavenAgentManager:
 	async def _test_api_connection(self):
 		"""Test API connection before creating agent"""
 		try:
+			if self.bot_doc.model_provider == "Gemini":
+				if not self.provider.client:
+					return False
+				# For Gemini, just a basic call to generate_content
+				res = await self.provider.client.aio.models.generate_content(
+					model=self.bot_doc.model or "gemini-2.5-flash",
+					contents="test",
+					config={"max_output_tokens": 5}
+				)
+				return bool(res and res.candidates)
+
 			# Try a simple completion to test connectivity
 			test_response = await self.client.chat.completions.create(
 				model=self.bot_doc.model, messages=[{"role": "user", "content": "test"}], max_tokens=5
@@ -348,8 +366,8 @@ class RavenAgentManager:
 
 	def _filter_tools_for_provider(self) -> list[Tool]:
 		"""Filter tools based on the provider capabilities"""
-		if self.bot_doc.model_provider == "Local LLM":
-			# Filter out hosted tools that are not supported with ChatCompletions API
+		if self.bot_doc.model_provider in ["Local LLM", "Gemini"]:
+			# Filter out hosted tools that are not supported natively or with ChatCompletions API
 			filtered_tools = []
 			hosted_tool_types = (
 				CodeInterpreterTool,
@@ -364,7 +382,7 @@ class RavenAgentManager:
 			for tool in self.tools:
 				if isinstance(tool, hosted_tool_types):
 					frappe.log_error(
-						f"Skipping hosted tool {tool.name} for Local LLM - not supported with ChatCompletions API",
+						f"Skipping hosted tool {tool.name} for {self.bot_doc.model_provider} - not supported natively yet",
 						"Tool Filtering",
 					)
 				else:

@@ -106,7 +106,7 @@
    "fieldname": "model_provider",
    "fieldtype": "Select",
    "label": "Model Provider",
-   "options": "OpenAI\nLocal LLM"
+   "options": "OpenAI\nLocal LLM\nGemini"
   },
   {
    "depends_on": "eval: doc.is_ai_bot",

@@ -762,3 +762,66 @@ def handle_get_document(document_id, reference_doctype=None):
 	except Exception as e:
 		frappe.log_error("SDK Functions Debug", f"Error in handle_get_document: {str(e)}")
 		return {"success": False, "error": str(e)}
+
+
+def handle_create_document(data=None, reference_doctype=None, **kwargs):
+	"""
+	Create a document
+	"""
+	if data is None:
+		data = kwargs
+
+	try:
+		if not reference_doctype:
+			reference_doctype = frappe.flags.get("current_function_doctype")
+
+		if not reference_doctype:
+			return {"success": False, "error": "No reference doctype provided."}
+
+		if not frappe.db.exists("DocType", reference_doctype):
+			return {"success": False, "error": f"DocType '{reference_doctype}' does not exist."}
+
+		doc = frappe.get_doc({"doctype": reference_doctype, **data})
+		doc.insert()
+
+		import datetime
+		doc_dict = doc.as_dict()
+		for key, value in doc_dict.items():
+			if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+				doc_dict[key] = str(value)
+
+		return {
+			"success": True,
+			"result": doc_dict,
+			"message": f"Document created successfully."
+		}
+
+	except Exception as e:
+		frappe.log_error("SDK Functions Debug", f"Error in handle_create_document: {str(e)}")
+		return {"success": False, "error": str(e)}
+
+
+def handle_delete_document(document_id, reference_doctype=None):
+	"""
+	Delete a document by ID
+	"""
+	try:
+		if not reference_doctype:
+			reference_doctype = frappe.flags.get("current_function_doctype")
+
+		if not reference_doctype:
+			return {"success": False, "error": "No reference doctype provided."}
+
+		if not frappe.db.exists(reference_doctype, document_id):
+			return {"success": False, "error": f"Document '{document_id}' not found."}
+
+		frappe.delete_doc(reference_doctype, document_id)
+
+		return {
+			"success": True,
+			"message": f"Document '{document_id}' deleted successfully."
+		}
+
+	except Exception as e:
+		frappe.log_error("SDK Functions Debug", f"Error in handle_delete_document: {str(e)}")
+		return {"success": False, "error": str(e)}
