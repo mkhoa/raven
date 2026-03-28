@@ -1,6 +1,6 @@
 import frappe
 
-from raven.ai.handler import get_variables_for_instructions
+
 
 
 @frappe.whitelist(methods=["GET"])
@@ -9,6 +9,7 @@ def get_instruction_preview(instruction: str):
 	Function to get the rendered instructions for the bot
 	"""
 	frappe.has_permission(doctype="Raven Bot", ptype="write", throw=True)
+	from raven.ai.handler import get_variables_for_instructions
 
 	instructions = frappe.render_template(instruction, get_variables_for_instructions())
 	return instructions
@@ -146,7 +147,7 @@ def get_gemini_available_models():
 		
 		if not api_key:
 			# If no key in settings, return a helpful hint + standard fallbacks
-			return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "(Enter Gemini API Key in Raven Settings to see more)"]
+			return ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest", "(Enter Gemini API Key in Raven Settings to see more)"]
 			
 		from google import genai
 		client = genai.Client(api_key=api_key)
@@ -161,10 +162,10 @@ def get_gemini_available_models():
 				if not any(x in name for x in ["vision", "aqa", "embedding"]):
 					compatible_models.append(name)
 				
-		return compatible_models or ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+		return compatible_models or ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
 	except Exception as e:
 		frappe.log_error(f"Error fetching Gemini models: {str(e)}", "Raven AI")
-		return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+		return ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
 
 
 @frappe.whitelist()

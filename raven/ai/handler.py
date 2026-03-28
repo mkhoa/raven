@@ -1,9 +1,14 @@
 import json
 
 import frappe
-from openai import AssistantEventHandler
-from openai.types.beta.threads import Text
-from openai.types.beta.threads.runs import RunStep
+try:
+	from openai import AssistantEventHandler
+	from openai.types.beta.threads import Text
+	from openai.types.beta.threads.runs import RunStep
+except ImportError:
+	AssistantEventHandler = object
+	Text = object
+	RunStep = object
 from typing_extensions import override
 
 from raven.ai.functions import (

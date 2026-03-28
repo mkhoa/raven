@@ -97,7 +97,7 @@ class RavenAgentManager:
 			)
 
 		# Keep client reference for backward compatibility
-		self.client = client
+		self.client = locals().get("client")
 
 	async def _test_api_connection(self):
 		"""Test API connection before creating agent"""

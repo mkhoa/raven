@@ -105,18 +105,45 @@ class GeminiModel(Model):
 
         return gemini_contents
 
-    def _convert_tools_to_gemini(self, tools: list[Tool]) -> list[types.Tool]:
+    def _cleanup_schema(self, schema: dict) -> dict:
+        """
+        Recursively remove unsupported fields from JSON schema for Gemini.
+        Gemini does not support 'additionalProperties' or 'additional_properties' in its FunctionDeclaration schema.
+        """
+        if not isinstance(schema, dict):
+            return schema
+
+        # Create a copy to avoid modifying the original tool object
+        cleaned = schema.copy()
+
+        # Remove unsupported fields
+        unsupported_fields = ["additionalProperties", "additional_properties", "default", "examples", "title"]
+        for field in unsupported_fields:
+            cleaned.pop(field, None)
+
+        # Recursively clean nested properties
+        if "properties" in cleaned and isinstance(cleaned["properties"], dict):
+            cleaned["properties"] = {k: self._cleanup_schema(v) for k, v in cleaned["properties"].items()}
+
+        # Recursively clean array items
+        if "items" in cleaned and isinstance(cleaned["items"], dict):
+            cleaned["items"] = self._cleanup_schema(cleaned["items"])
+
+        return cleaned
+
+    def _convert_tools(self, tools: list[Tool]) -> list[types.Tool]:
+        """Convert agents SDK tools to Gemini native Tool objects"""
         gemini_tools = []
         function_declarations = []
         for tool in tools:
             # Only FunctionTool is easily convertible to Gemini
             if hasattr(tool, "params_json_schema"):
-                # Make sure parameters is an object type
-                params = tool.params_json_schema or {"type": "object", "properties": {}}
-                if "type" not in params:
+                # Clean up the schema for Gemini compatibility
+                params = self._cleanup_schema(tool.params_json_schema or {"type": "object", "properties": {}})
+                
+                # Ensure type is set to object if properties exist
+                if "properties" in params and "type" not in params:
                     params["type"] = "object"
-                if "properties" not in params:
-                    params["properties"] = {}
                 
                 function_declarations.append(
                     types.FunctionDeclaration(
@@ -157,7 +184,7 @@ class GeminiModel(Model):
                 system_instructions = f"{system_instructions}\n{extracted_sys}" if system_instructions else extracted_sys
 
         contents = self._convert_input_to_gemini(input)
-        gemini_tools = self._convert_tools_to_gemini(tools)
+        gemini_tools = self._convert_tools(tools)
 
         config_kwargs = {
             "temperature": model_settings.temperature,
@@ -193,9 +220,17 @@ class GeminiModel(Model):
                 # Extract text parts
                 text_parts = [p.text for p in parts if getattr(p, "text", None)]
                 if text_parts:
+                    msg_id = f"msg_{frappe.generate_hash(length=12)}"
                     output_items.append({
+                        "id": msg_id,
                         "role": "assistant",
-                        "content": [{"type": "text", "text": " ".join(text_parts)}]
+                        "status": "completed",
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text", 
+                            "text": " ".join(text_parts),
+                            "annotations": []
+                        }]
                     })
                 
                 # Extract function calls
@@ -206,9 +241,14 @@ class GeminiModel(Model):
                         fc_args = fc.args if fc.args else {}
                         args_json = json.dumps(fc_args) if isinstance(fc_args, dict) else str(fc_args)
                         
+                        call_id = f"call_{frappe.generate_hash(length=12)}"
                         output_items.append({
-                            "id": f"call_{fc_name}_{hash(args_json)}", 
+                            "id": call_id,
+                            "call_id": call_id,
                             "type": "function",
+                            "status": "completed",
+                            "name": fc_name,
+                            "arguments": args_json,
                             "function": {
                                 "name": fc_name,
                                 "arguments": args_json
@@ -235,4 +275,4 @@ class GeminiProvider(ModelProvider):
 
     def get_model(self, model_name: str | None) -> Model:
         # Default model if none specified
-        return GeminiModel(model_name or "gemini-1.5-flash", self.api_key)
+        return GeminiModel(model_name or "gemini-flash-latest", self.api_key)
