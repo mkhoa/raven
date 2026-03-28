@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -91,9 +92,12 @@ class GeminiModel(Model):
                         call_id = raw_id
                         thought_sig = None
                         if raw_id and "||ts||" in str(raw_id):
-                            parts_id = str(raw_id).split("||ts||")
+                            parts_id = str(raw_id).split("||ts||", 1)
                             call_id = parts_id[0]
-                            thought_sig = parts_id[1]
+                            try:
+                                thought_sig = base64.b64decode(parts_id[1])
+                            except Exception:
+                                thought_sig = parts_id[1]
                         
                         # Gemini expects args as dict
                         if isinstance(fn_args, str):
@@ -118,7 +122,7 @@ class GeminiModel(Model):
                 raw_id = item.get("tool_call_id")
                 call_id = raw_id
                 if raw_id and "||ts||" in str(raw_id):
-                    parts_id = str(raw_id).split("||ts||")
+                    parts_id = str(raw_id).split("||ts||", 1)
                     call_id = parts_id[0]
                 
                 # Gemini expects function_response to be a dict
@@ -322,7 +326,12 @@ class GeminiModel(Model):
 
                         encoded_id = raw_id
                         if thought_sig:
-                            encoded_id = f"{raw_id}||ts||{thought_sig}"
+                            # base64-encode bytes so they survive as a plain string in call_id
+                            if isinstance(thought_sig, bytes):
+                                ts_str = base64.b64encode(thought_sig).decode("ascii")
+                            else:
+                                ts_str = str(thought_sig)
+                            encoded_id = f"{raw_id}||ts||{ts_str}"
 
                         args_dict = fc.args if isinstance(fc.args, dict) else {}
                         args_json = json.dumps(args_dict)
