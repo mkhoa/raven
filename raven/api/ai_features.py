@@ -51,7 +51,7 @@ def get_openai_available_models():
 
 	models = get_openai_models()
 
-	valid_prefixes = ["gpt-4", "gpt-3.5", "o1", "o3-mini"]
+	valid_prefixes = ["gpt-5", "gpt-4", "gpt-3.5", "o1", "o3-mini"]
 
 	# Model should not contain these words
 	invalid_models = ["realtime", "transcribe", "search", "audio"]
@@ -145,19 +145,23 @@ def get_gemini_available_models():
 		api_key = settings.get_password("gemini_api_key")
 		
 		if not api_key:
-			return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+			# If no key in settings, return a helpful hint + standard fallbacks
+			return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp", "(Enter Gemini API Key in Raven Settings to see more)"]
 			
 		from google import genai
 		client = genai.Client(api_key=api_key)
 		
 		# List models and filter for generateContent compatible ones
-		models = client.models.list()
+		models = list(client.models.list(config={'page_size': 50}))
 		compatible_models = []
 		for m in models:
 			if "generateContent" in m.supported_methods:
-				compatible_models.append(m.name.replace("models/", ""))
+				name = m.name.replace("models/", "")
+				# Filter for actual model IDs, skip legacy/internal ones if needed
+				if not any(x in name for x in ["vision", "aqa", "embedding"]):
+					compatible_models.append(name)
 				
-		return compatible_models
+		return compatible_models or ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
 	except Exception as e:
 		frappe.log_error(f"Error fetching Gemini models: {str(e)}", "Raven AI")
 		return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
@@ -181,7 +185,7 @@ def test_gemini_configuration():
 		client = genai.Client(api_key=api_key)
 		
 		# Try a minimal list models call to verify the key
-		models = client.models.list(config={'page_size': 5})
+		models = list(client.models.list(config={'page_size': 5}))
 		return {
 			"success": True, 
 			"message": "Successfully connected to Gemini API",

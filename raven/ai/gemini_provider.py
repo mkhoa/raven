@@ -13,11 +13,13 @@ from agents.handoffs import Handoff
 from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent, Usage
 from agents.models.interface import Model, ModelProvider, ModelTracing
 from agents.tool import Tool
-from openai.types.responses import ResponseOutputMessage, ResponseOutputText, ResponseFunctionToolCall
+# Removed problematic openai imports causing 'openai.resources' errors
+from typing import TypedDict
 
 if TYPE_CHECKING:
     from agents.model_settings import ModelSettings
-    from openai.types.responses.response_prompt_param import ResponsePromptParam
+    # ResponsePromptParam often causes issues in different versions, using Any for safety in types
+    ResponsePromptParam = Any
 
 
 class GeminiModel(Model):
@@ -180,7 +182,7 @@ class GeminiModel(Model):
             frappe.log_error(f"Gemini API Error: {str(e)}", "Gemini Native Provider")
             raise Exception(f"Failed to generate content via Gemini API: {str(e)}")
 
-        output_items = []
+        output_items: list[dict[str, Any]] = []
         if response.candidates:
             for candidate in response.candidates:
                 if not candidate.content or not getattr(candidate.content, "parts", None):
@@ -191,10 +193,10 @@ class GeminiModel(Model):
                 # Extract text parts
                 text_parts = [p.text for p in parts if getattr(p, "text", None)]
                 if text_parts:
-                    output_items.append(ResponseOutputMessage(
-                        role="assistant",
-                        content=[ResponseOutputText(type="text", text=" ".join(text_parts))]
-                    ))
+                    output_items.append({
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": " ".join(text_parts)}]
+                    })
                 
                 # Extract function calls
                 for part in parts:
@@ -204,14 +206,14 @@ class GeminiModel(Model):
                         fc_args = fc.args if fc.args else {}
                         args_json = json.dumps(fc_args) if isinstance(fc_args, dict) else str(fc_args)
                         
-                        output_items.append(ResponseFunctionToolCall(
-                            id=f"call_{fc_name}_{hash(args_json)}", # Semi-unique ID acceptable for agents parser
-                            type="function",
-                            function={
+                        output_items.append({
+                            "id": f"call_{fc_name}_{hash(args_json)}", 
+                            "type": "function",
+                            "function": {
                                 "name": fc_name,
                                 "arguments": args_json
                             }
-                        ))
+                        })
 
         usage_metadata = response.usage_metadata
         usage = Usage(
