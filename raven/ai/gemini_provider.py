@@ -16,6 +16,18 @@ from agents.tool import Tool
 # Removed problematic openai imports causing 'openai.resources' errors
 from typing import TypedDict
 
+# Import openai response types for agents SDK compatibility.
+# Newer openai-agents versions require typed objects (not raw dicts) in ModelResponse.output.
+try:
+    from openai.types.responses import (
+        ResponseOutputMessage,
+        ResponseOutputText,
+        ResponseFunctionToolCall as OAIResponseFunctionToolCall,
+    )
+    _OPENAI_TYPES_AVAILABLE = True
+except ImportError:
+    _OPENAI_TYPES_AVAILABLE = False
+
 if TYPE_CHECKING:
     from agents.model_settings import ModelSettings
     # ResponsePromptParam often causes issues in different versions, using Any for safety in types
@@ -265,7 +277,7 @@ class GeminiModel(Model):
         except Exception as _dbg_e:
             frappe.log_error(f"Debug logging failed: {_dbg_e}", "Gemini Debug")
 
-        output_items: list[dict[str, Any]] = []
+        output_items: list[Any] = []
         if response.candidates:
             for candidate in response.candidates:
                 if not candidate.content or not hasattr(candidate.content, "parts"):
@@ -273,50 +285,66 @@ class GeminiModel(Model):
 
                 parts = candidate.content.parts
 
-                # Extract text parts
-                text_parts = [p.text for p in parts if hasattr(p, "text") and p.text]
+                # Extract text parts (exclude thought-only parts which have no actual text)
+                text_parts = [p.text for p in parts if hasattr(p, "text") and p.text and not getattr(p, "thought", False)]
                 if text_parts:
                     msg_id = f"msg_{frappe.generate_hash(length=12)}"
-                    output_items.append({
-                        "id": msg_id,
-                        "role": "assistant",
-                        "status": "completed",
-                        "type": "message",
-                        "content": [{
-                            "type": "output_text", 
-                            "text": "".join(text_parts),
-                            "annotations": []
-                        }]
-                    })
-                
+                    joined_text = "".join(text_parts)
+                    if _OPENAI_TYPES_AVAILABLE:
+                        output_items.append(ResponseOutputMessage(
+                            id=msg_id,
+                            role="assistant",
+                            status="completed",
+                            type="message",
+                            content=[ResponseOutputText(
+                                type="output_text",
+                                text=joined_text,
+                                annotations=[],
+                            )],
+                        ))
+                    else:
+                        output_items.append({
+                            "id": msg_id,
+                            "role": "assistant",
+                            "status": "completed",
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": joined_text, "annotations": []}],
+                        })
+
                 # Extract function calls
                 for part in parts:
                     if hasattr(part, "function_call") and part.function_call:
                         fc = part.function_call
-                        
+
                         # Extract and encode thought_signature into the call_id
                         raw_id = fc.id or frappe.generate_hash(length=12)
                         thought_sig = getattr(part, "thought_signature", None)
-                        
+
                         encoded_id = raw_id
                         if thought_sig:
                             encoded_id = f"{raw_id}||ts||{thought_sig}"
-                        
+
                         args_dict = fc.args if isinstance(fc.args, dict) else {}
                         args_json = json.dumps(args_dict)
-                        
-                        output_items.append({
-                            "id": encoded_id,
-                            "call_id": encoded_id,
-                            "type": "function_call",
-                            "status": "completed",
-                            "name": fc.name,
-                            "arguments": args_json,
-                            "function": {
+
+                        if _OPENAI_TYPES_AVAILABLE:
+                            output_items.append(OAIResponseFunctionToolCall(
+                                id=encoded_id,
+                                call_id=encoded_id,
+                                type="function_call",
+                                status="completed",
+                                name=fc.name,
+                                arguments=args_json,
+                            ))
+                        else:
+                            output_items.append({
+                                "id": encoded_id,
+                                "call_id": encoded_id,
+                                "type": "function_call",
+                                "status": "completed",
                                 "name": fc.name,
-                                "arguments": args_json
-                            }
-                        })
+                                "arguments": args_json,
+                            })
 
         usage_metadata = response.usage_metadata
         usage = Usage(
