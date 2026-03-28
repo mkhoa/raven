@@ -109,12 +109,17 @@ const AISettings = () => {
                             <Tabs.Root defaultValue="openai">
                                 <Tabs.List>
                                     <Tabs.Trigger value="openai">OpenAI</Tabs.Trigger>
+                                    <Tabs.Trigger value="gemini">Gemini</Tabs.Trigger>
                                     <Tabs.Trigger value="local">Local LLM</Tabs.Trigger>
                                 </Tabs.List>
 
                                 <Box mt="4">
                                     <Tabs.Content value="openai">
                                         <OpenAISection />
+                                    </Tabs.Content>
+
+                                    <Tabs.Content value="gemini">
+                                        <GeminiSection />
                                     </Tabs.Content>
 
                                     <Tabs.Content value="local">
@@ -400,6 +405,64 @@ const LocalLLMSection = () => {
                     </Callout.Root>
                 </>
             ) : null}
+        </Flex>
+    )
+}
+
+const GeminiSection = () => {
+    const { watch, control, register, formState: { errors } } = useFormContext<RavenSettings>()
+    const enableGemini = watch('enable_gemini_services')
+
+    return (
+        <Flex direction="column" gap="4">
+            <Flex direction={'column'} gap='2'>
+                <Text as="label" size="2">
+                    <Flex gap="2">
+                        <Controller
+                            control={control}
+                            name='enable_gemini_services'
+                            render={({ field }) => (
+                                <Checkbox
+                                    checked={field.value ? true : false}
+                                    name={field.name}
+                                    disabled={field.disabled}
+                                    onCheckedChange={(v) => field.onChange(v ? 1 : 0)}
+                                />
+                            )} />
+                        Enable Gemini Services
+                    </Flex>
+                </Text>
+            </Flex>
+
+            {enableGemini ? (
+                <Box>
+                    <Label htmlFor='gemini_api_key' isRequired>Gemini API Key</Label>
+                    <TextField.Root
+                        className={'w-48 sm:w-96'}
+                        id='gemini_api_key'
+                        required
+                        type='password'
+                        autoComplete='off'
+                        {...register('gemini_api_key', {
+                            required: enableGemini ? "Please add your Gemini API Key" : false,
+                        })}
+                        aria-invalid={errors.gemini_api_key ? 'true' : 'false'}
+                    />
+                    {errors?.gemini_api_key && <ErrorText>{errors.gemini_api_key?.message}</ErrorText>}
+                    <HelperText>
+                        Securely store your Google Gemini API Key.
+                    </HelperText>
+                </Box>
+            ) : null}
+
+            <Callout.Root size="1">
+                <Callout.Icon>
+                    <BiInfoCircle />
+                </Callout.Icon>
+                <Callout.Text>
+                    Native Gemini integration allows you to leverage advanced features like Context Caching and larger context windows.
+                </Callout.Text>
+            </Callout.Root>
         </Flex>
     )
 }

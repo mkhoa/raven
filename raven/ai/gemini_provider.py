@@ -233,4 +233,4 @@ class GeminiProvider(ModelProvider):
 
     def get_model(self, model_name: str | None) -> Model:
         # Default model if none specified
-        return GeminiModel(model_name or "gemini-2.5-flash", self.api_key)
+        return GeminiModel(model_name or "gemini-1.5-flash", self.api_key)

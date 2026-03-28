@@ -236,15 +236,16 @@ const ModelProviderSelector = () => {
 
     const hasOpenAI = ravenSettings?.enable_openai_services
     const hasLocalLLM = ravenSettings?.enable_local_llm
+    const hasGemini = ravenSettings?.enable_gemini_services
 
-    if (!hasOpenAI && !hasLocalLLM) {
+    if (!hasOpenAI && !hasLocalLLM && !hasGemini) {
         return (
             <Callout.Root color="red" size="1">
                 <Callout.Icon>
                     <BiInfoCircle />
                 </Callout.Icon>
                 <Callout.Text>
-                    No AI providers are configured. Please configure OpenAI or Local LLM in AI Settings.
+                    No AI providers are configured. Please configure OpenAI, Gemini, or Local LLM in AI Settings.
                 </Callout.Text>
             </Callout.Root>
         )
@@ -258,15 +259,16 @@ const ModelProviderSelector = () => {
                     rules={{
                         required: is_ai_bot ? "Please select a model provider" : false
                     }}
-                    defaultValue={hasOpenAI ? 'OpenAI' : hasLocalLLM ? 'Local LLM' : 'OpenAI'}
+                    defaultValue={hasOpenAI ? 'OpenAI' : hasGemini ? 'Gemini' : hasLocalLLM ? 'Local LLM' : 'OpenAI'}
                     render={({ field }) => (
                         <Select.Root
-                            value={field.value || (hasOpenAI ? 'OpenAI' : 'Local LLM')}
+                            value={field.value || (hasOpenAI ? 'OpenAI' : hasGemini ? 'Gemini' : 'Local LLM')}
                             name={field.name}
                             onValueChange={(value) => field.onChange(value)}>
                             <Select.Trigger placeholder='Select Provider' className='w-full' />
                             <Select.Content>
                                 {hasOpenAI ? <Select.Item value='OpenAI'>OpenAI</Select.Item> : null}
+                                {hasGemini ? <Select.Item value='Gemini'>Gemini</Select.Item> : null}
                                 {hasLocalLLM ? <Select.Item value='Local LLM'>Local LLM</Select.Item> : null}
                             </Select.Content>
                         </Select.Root>
@@ -311,7 +313,7 @@ const ModelSelector = () => {
     const models: string[] = modelProvider === 'Local LLM' ? localModels : openaiModels?.message || []
     const defaultModel = modelProvider === 'Local LLM'
         ? (localModels[0] || 'default-model')
-        : 'gpt-4o'
+        : modelProvider === 'Gemini' ? 'gemini-1.5-flash' : 'gpt-4o'
 
     // Filter out empty strings from models
     const validModels = models.filter(model => model && model.trim() !== '')
@@ -338,6 +340,8 @@ const ModelSelector = () => {
                                     ))
                                 ) : modelProvider === 'Local LLM' ? (
                                     <Select.Item value="no-models" disabled>No models available</Select.Item>
+                                ) : modelProvider === 'Gemini' ? (
+                                    <Select.Item value="gemini-1.5-flash">gemini-1.5-flash</Select.Item>
                                 ) : (
                                     <Select.Item value={defaultModel}>{defaultModel}</Select.Item>
                                 )}
@@ -349,6 +353,8 @@ const ModelSelector = () => {
             <HelperText>
                 {modelProvider === 'Local LLM'
                     ? 'Select a model available on your local LLM server.'
+                    : modelProvider === 'Gemini'
+                    ? 'Enter the name of the Gemini model you wish to use (e.g. gemini-1.5-flash).'
                     : 'The model should be compatible with the OpenAI Assistants API. We recommend using models in the GPT-4 family for best results.'}
             </HelperText>
         </Stack>

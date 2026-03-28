@@ -27,7 +27,7 @@ export interface RavenBot{
 	/**	Is AI Bot? : Check	*/
 	is_ai_bot?: 0 | 1
 	/**	Model Provider : Select	*/
-	model_provider?: "OpenAI" | "Local LLM"
+	model_provider?: "OpenAI" | "Local LLM" | "Gemini"
 	/**	Model : Data - For OpenAI: gpt-4o, gpt-4, etc. For Local LLM: use model name from /v1/models endpoint	*/
 	model?: string
 	/**	Temperature : Float - What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.	*/

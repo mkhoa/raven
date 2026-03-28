@@ -12,8 +12,9 @@ const AINotEnabledCallout = () => {
     const isAIEnabled = ravenSettings?.enable_ai_integration === 1
     const hasOpenAI = ravenSettings?.enable_openai_services === 1
     const hasLocalLLM = ravenSettings?.enable_local_llm === 1
+    const hasGemini = ravenSettings?.enable_gemini_services === 1
     
-    if (isAIEnabled && (hasOpenAI || hasLocalLLM)) {
+    if (isAIEnabled && (hasOpenAI || hasLocalLLM || hasGemini)) {
         return null
     }
 
