@@ -534,7 +534,7 @@ async def handle_ai_request_async(
 
 			# Use Runner.run as a static method (not an instance)
 			# Set max_turns to prevent infinite loops
-			result = await Runner.run(agent, full_input, max_turns=5)
+			result = await Runner.run(agent, full_input, max_turns=15)
 
 			# DEBUG: log Runner result
 			try:

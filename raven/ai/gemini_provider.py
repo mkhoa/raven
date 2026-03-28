@@ -377,14 +377,25 @@ class GeminiModel(Model):
                             "content": [{"type": "output_text", "text": joined_text, "annotations": []}],
                         })
 
+                # Collect thought_signature from any thought part as fallback.
+                # On thinking models (gemini-2.0/2.5) the signature often lives on
+                # the dedicated thought part, not on the function_call part itself.
+                response_thought_sig = None
+                for p in parts:
+                    if getattr(p, "thought", False) and getattr(p, "thought_signature", None):
+                        response_thought_sig = p.thought_signature
+                        break
+
                 # Extract function calls
                 for part in parts:
                     if hasattr(part, "function_call") and part.function_call:
                         fc = part.function_call
 
-                        # Extract and encode thought_signature into the call_id
+                        # Extract and encode thought_signature into the call_id.
+                        # Prefer the signature on the function_call part itself; fall back
+                        # to the one found on the sibling thought part.
                         raw_id = fc.id or frappe.generate_hash(length=12)
-                        thought_sig = getattr(part, "thought_signature", None)
+                        thought_sig = getattr(part, "thought_signature", None) or response_thought_sig
 
                         encoded_id = raw_id
                         if thought_sig:
