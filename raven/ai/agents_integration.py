@@ -561,17 +561,17 @@ async def handle_ai_request_async(
 					)
 
 					# Build messages array with proper conversation history
-					messages = [{"role": "system", "content": [{"type": "text", "text": enhanced_instructions}]}]
+					messages = [{"role": "system", "content": enhanced_instructions}]
 
 					# Add conversation history as separate messages
 					if conversation_history:
 						for msg in conversation_history:
 							messages.append(
-								{"role": msg["role"], "content": [{"type": "text", "text": msg["content"]}]}
+								{"role": msg["role"], "content": msg["content"]}
 							)
 
 					# Add current user message
-					messages.append({"role": "user", "content": [{"type": "text", "text": message}]})
+					messages.append({"role": "user", "content": message})
 
 					# Create the API call with or without tools
 					api_params = {
@@ -613,14 +613,15 @@ async def handle_ai_request_async(
 							# If we have tool results, make another API call with the results
 							if tool_results:
 								# Add assistant message with tool calls
-								assistant_message = choice.message.model_dump()
-								# Fix assistant message content format
-								if isinstance(assistant_message.get("content"), str):
-									assistant_message["content"] = [{"type": "text", "text": assistant_message["content"]}]
+								# Exclude None to prevent sending `function_call: null` to Gemini, which throws "Value is not a struct: null"
+								assistant_message = choice.message.model_dump(exclude_none=True)
+								# Ensure content is passed correctly as a string or empty string
+								if assistant_message.get("content") is None:
+									assistant_message["content"] = ""
 
 								messages = [
-									{"role": "system", "content": [{"type": "text", "text": agent.instructions}]},
-									{"role": "user", "content": [{"type": "text", "text": str(full_input)}]},
+									{"role": "system", "content": agent.instructions},
+									{"role": "user", "content": str(full_input)},
 									assistant_message,
 								]
 
@@ -634,7 +635,7 @@ async def handle_ai_request_async(
 									messages.append(
 										{
 											"role": "tool",
-											"content": [{"type": "text", "text": result["output"]}],
+											"content": output_content,
 											"tool_call_id": result["tool_call_id"],
 										}
 									)
