@@ -536,18 +536,6 @@ async def handle_ai_request_async(
 			# Set max_turns to prevent infinite loops
 			result = await Runner.run(agent, full_input, max_turns=15)
 
-			# DEBUG: log Runner result
-			try:
-				frappe.log_error(
-					f"Runner.run completed\n"
-					f"final_output type={type(result.final_output).__name__}\n"
-					f"final_output={repr(result.final_output)[:300]}\n"
-					f"new_items count={len(result.new_items) if hasattr(result, 'new_items') else 'N/A'}",
-					"Gemini Debug Runner"
-				)
-			except Exception as _dbg_e:
-				frappe.log_error(f"Runner debug logging failed: {_dbg_e}", "Gemini Debug Runner")
-
 		except (TypeError, openai.NotFoundError) as e:
 			# Handle both TypeError and NotFoundError (404) with fallback
 			should_fallback = False

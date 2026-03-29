@@ -274,19 +274,6 @@ class GeminiModel(Model):
         if not self.client:
             raise Exception("Gemini client not initialized. Check API Key.")
 
-        # DEBUG: log raw input items to see what the agents SDK sends on each turn
-        try:
-            if isinstance(input, list):
-                debug_input = []
-                for i, item in enumerate(input):
-                    item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
-                    item_role = item.get("role") if isinstance(item, dict) else getattr(item, "role", None)
-                    item_keys = list(item.keys()) if isinstance(item, dict) else dir(item)
-                    debug_input.append(f"  [{i}] type={item_type} role={item_role} keys={item_keys}")
-                frappe.log_error("\n".join(["Input items:"] + debug_input), "Gemini Debug Input")
-        except Exception as _dbg_e:
-            frappe.log_error(f"Input debug failed: {_dbg_e}", "Gemini Debug Input")
-
         # If input has system prompt embedded inside the list, extract it as system_instruction
         if isinstance(input, list):
             embedded_system_prompts = [item.get("content", "") for item in input if item.get("role") == "system"]
@@ -319,29 +306,6 @@ class GeminiModel(Model):
         except Exception as e:
             frappe.log_error(f"Gemini API Error: {str(e)}", "Gemini Native Provider")
             raise Exception(f"Failed to generate content via Gemini API: {str(e)}")
-
-        # DEBUG: log raw Gemini response
-        try:
-            debug_lines = [
-                f"model={self.model_name}",
-                f"candidates={len(response.candidates) if response.candidates else 0}",
-                f"prompt_feedback={getattr(response, 'prompt_feedback', None)}",
-                f"usage={response.usage_metadata}",
-            ]
-            if response.candidates:
-                for ci, cand in enumerate(response.candidates):
-                    debug_lines.append(f"candidate[{ci}].finish_reason={getattr(cand, 'finish_reason', None)}")
-                    if cand.content and hasattr(cand.content, "parts"):
-                        for pi, p in enumerate(cand.content.parts):
-                            debug_lines.append(
-                                f"  part[{pi}]: text={repr(p.text)[:120] if hasattr(p, 'text') else 'N/A'}"
-                                f" | thought={getattr(p, 'thought', None)}"
-                                f" | has_fc={bool(getattr(p, 'function_call', None))}"
-                                f" | has_ts={bool(getattr(p, 'thought_signature', None))}"
-                            )
-            frappe.log_error("\n".join(debug_lines), "Gemini Debug")
-        except Exception as _dbg_e:
-            frappe.log_error(f"Debug logging failed: {_dbg_e}", "Gemini Debug")
 
         output_items: list[Any] = []
         if response.candidates:
