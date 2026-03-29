@@ -515,12 +515,14 @@ class RavenAIFunction(Document):
 
 	def on_update(self):
 		# Update all the bots that use this function
+		# Only update OpenAI assistants — Gemini and Local LLM bots don't use them.
 
 		bots = frappe.get_all("Raven Bot Functions", filters={"function": self.name}, pluck="parent")
 
 		for bot in bots:
 			bot = frappe.get_doc("Raven Bot", bot)
-			bot.update_openai_assistant()
+			if bot.model_provider == "OpenAI" and bot.openai_assistant_id:
+				bot.update_openai_assistant()
 
 	def get_params_as_dict(self):
 		if isinstance(self.params, dict):

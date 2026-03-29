@@ -131,8 +131,8 @@ class RavenBot(Document):
 			if self.model_provider == "OpenAI":
 				# Skip assistant creation for Local LLM
 				self.create_openai_assistant()
-			elif self.model_provider == "Local LLM":
-				# For Local LLM, we don't need an OpenAI assistant
+			elif self.model_provider in ("Local LLM", "Gemini"):
+				# For Local LLM and Gemini, we don't need an OpenAI assistant
 				return
 
 	def on_trash(self):
