@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -289,12 +290,81 @@ class GeminiModel(Model):
             "top_p": model_settings.top_p,
             "candidate_count": 1,
         }
-        
-        if system_instructions:
-            config_kwargs["system_instruction"] = system_instructions
-        if gemini_tools:
-            config_kwargs["tools"] = gemini_tools
-            
+
+        # ── Context Caching ───────────────────────────────────────────────
+        # Build a deterministic key from the static parts of the request
+        # (model + system prompt + tool signatures) so we can reuse a
+        # Gemini CachedContent across turns.
+        cached_content_name = None
+        if system_instructions or gemini_tools:
+            cache_input = json.dumps({
+                "model": self.model_name,
+                "system_instruction": system_instructions or "",
+                "tools": [t.to_json_dict() if hasattr(t, 'to_json_dict') else str(t) for t in gemini_tools],
+            }, sort_keys=True)
+            cache_hash = hashlib.md5(cache_input.encode()).hexdigest()
+            redis_key = f"gemini_cache:{cache_hash}"
+
+            # Check Redis for an existing cache name
+            cached_value = frappe.cache.get_value(redis_key)
+            if cached_value and cached_value != "UNCACHEABLE":
+                # Verify the remote cache still exists
+                try:
+                    self.client.caches.get(name=cached_value)
+                    cached_content_name = cached_value
+                except Exception:
+                    # Cache expired on Gemini side, clear Redis entry
+                    frappe.cache.delete_value(redis_key)
+                    cached_value = None
+
+            if not cached_content_name and cached_value != "UNCACHEABLE":
+                # Attempt to create a new cache
+                try:
+                    cache_config = types.CreateCachedContentConfig(
+                        display_name=f"raven_{cache_hash[:12]}",
+                        system_instruction=system_instructions,
+                        ttl="86400s",  # 1 day
+                    )
+                    if gemini_tools:
+                        cache_config.tools = gemini_tools
+
+                    cache_obj = self.client.caches.create(
+                        model=self.model_name,
+                        config=cache_config,
+                    )
+                    cached_content_name = cache_obj.name
+                    # Store in Redis; expire after 23 hours (slightly before the
+                    # Gemini-side TTL) so we never reference a stale cache.
+                    frappe.cache.set_value(redis_key, cached_content_name, expires_in_sec=82800)
+                    frappe.logger("gemini_cache").info(
+                        f"Created Gemini cache: {cached_content_name} (hash={cache_hash[:12]})"
+                    )
+                except Exception as cache_err:
+                    err_msg = str(cache_err).lower()
+                    if "too few tokens" in err_msg or "min_token" in err_msg or "too small" in err_msg:
+                        # System prompt + tools are below minimum token threshold;
+                        # mark as uncacheable so we don't retry on every turn.
+                        frappe.cache.set_value(redis_key, "UNCACHEABLE", expires_in_sec=86400)
+                        frappe.logger("gemini_cache").info(
+                            f"Marked config as UNCACHEABLE (hash={cache_hash[:12]}): {cache_err}"
+                        )
+                    else:
+                        frappe.log_error(
+                            f"Gemini cache creation error: {cache_err}",
+                            "Gemini Context Cache",
+                        )
+
+        # ── Build GenerateContentConfig ────────────────────────────────────
+        if cached_content_name:
+            # When using cached_content, system_instruction and tools must NOT
+            # be specified — they are already inside the cache.
+            config_kwargs["cached_content"] = cached_content_name
+        else:
+            if system_instructions:
+                config_kwargs["system_instruction"] = system_instructions
+            if gemini_tools:
+                config_kwargs["tools"] = gemini_tools
+
         config = types.GenerateContentConfig(**config_kwargs)
 
         try:
